@@ -12,17 +12,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
 type Message struct {
-	From     string
+	Uuid     uuid.UUID
+	FromNick string
 	Content  string
 	SentTime time.Time
 }
 
 func (m Message) String() string {
-	return "[" + m.SentTime.Local().Format("15:04:05") + "] " + "<" + m.From + "> " + m.Content
+	return "[" + m.SentTime.Local().Format("15:04:05") + "] " + "<" + m.FromNick + "> " + m.Content
 }
 
 // location of the server

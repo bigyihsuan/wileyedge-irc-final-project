@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -37,6 +38,7 @@ var upgrader = websocket.Upgrader{
 
 // middleman between websocket and chatroom
 type Client struct {
+	Uuid        uuid.UUID
 	Nickname    string
 	CurrentRoom *Room           // the room this client is in
 	Connection  *websocket.Conn // connection to the server
@@ -67,9 +69,10 @@ func (c *Client) readSocket() {
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		log.Printf("client got message `%s` from %s\n", string(message), c.Nickname)
+		log.Printf("client got message `%s` from %s\n", string(message), c.Uuid)
 		sent := Message{
-			From:     c.Nickname,
+			Uuid:     c.Uuid,
+			FromNick: c.Nickname,
 			Content:  string(message),
 			SentTime: time.Now(),
 		}
@@ -77,7 +80,7 @@ func (c *Client) readSocket() {
 	}
 }
 
-// moves messages from the current room to the websocket connection
+// moves messages from the current room to the websocket connection to the client
 func (c *Client) writeSocket() {
 	ticker := time.NewTicker(pingPeriod) // tick every so often
 	defer func() {
@@ -125,6 +128,21 @@ func (c *Client) writeSocket() {
 	}
 }
 
+func (c Client) DirectMessage(message Message) {
+	w, err := c.Connection.NextWriter(websocket.TextMessage)
+	if err != nil {
+		// cannot write to the connection
+		return
+	}
+	// send the content of the message to the client
+	// w.Write(message.Content)
+	json.NewEncoder(w).Encode(message)
+	if err := w.Close(); err != nil {
+		// cannot close the writer to the outbound queue
+		return
+	}
+}
+
 // handle websocket requests from peers
 func ServeWebSocket(room *Room, w http.ResponseWriter, r *http.Request) {
 	// convert http to websocket
@@ -136,7 +154,13 @@ func ServeWebSocket(room *Room, w http.ResponseWriter, r *http.Request) {
 	}
 	nickname := r.URL.Query().Get("nickname")
 	log.Printf("Got client with nickname `%s`", nickname)
-	client := &Client{Nickname: string(nickname), CurrentRoom: room, Connection: conn, Send: make(chan Message)}
+	client := &Client{
+		Nickname:    string(nickname),
+		CurrentRoom: room,
+		Connection:  conn,
+		Send:        make(chan Message),
+		Uuid:        uuid.New(),
+	}
 	// enter the room
 	client.CurrentRoom.Register <- client
 
