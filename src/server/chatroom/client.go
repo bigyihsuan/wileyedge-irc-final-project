@@ -69,8 +69,9 @@ func (c *Client) readSocket() {
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
 		log.Printf("client got message `%s` from %s\n", string(message), c.Nickname)
 		sent := Message{
-			From:    c.Nickname,
-			Content: string(message),
+			From:     c.Nickname,
+			Content:  string(message),
+			SentTime: time.Now(),
 		}
 		c.CurrentRoom.Broadcast <- sent
 	}

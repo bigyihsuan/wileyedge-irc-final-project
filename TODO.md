@@ -1,4 +1,4 @@
-# TODO
+# TODO: Minimum Requirements
 
 ## Server
 
@@ -11,6 +11,7 @@
 
 - [ ] Ask for a nickname
 - [ ] Usernames are unique to a session
+- [ ] Clients should have a globally unique ID
 - [ ] Non-unique usernames will be made unique
 - [ ] Display list of available servers, ***including classmates' servers***
 - [ ] Allow the user to connect to any of the servers
@@ -21,3 +22,9 @@
 - [ ] Create a new channel
 - [ ] Join 1 or more chanels and talk
 - [ ] Make PMs with one other user
+
+## Additional
+
+```md
+Task 1) in server generate new UUID for every client and redirect it to every message   Task 2) send message to selected Client
+```

@@ -1,6 +1,10 @@
 package chatroom
 
-import "log"
+import (
+	"fmt"
+	"log"
+	"time"
+)
 
 // manages active clients, and broadcasting to active clients
 type Room struct {
@@ -12,8 +16,9 @@ type Room struct {
 
 // a representation of a message, containing a source and its contents
 type Message struct {
-	From    string `json:"From"`    // the nickname of the user this message is from
-	Content string `json:"Content"` // the actual message
+	From     string    `json:"From"`    // the nickname of the user this message is from
+	Content  string    `json:"Content"` // the actual message
+	SentTime time.Time `json:"SentTime"`
 }
 
 func NewRoom() *Room {
@@ -32,6 +37,10 @@ func (r *Room) Run() {
 		case client := <-r.Register:
 			// register an incoming user
 			log.Printf("Register %s\n", client.Nickname)
+			// broadcast "joined" message
+			go func() {
+				r.Broadcast <- Message{From: "SERVER", Content: fmt.Sprintf("---- <%s> joined the room ----", client.Nickname), SentTime: time.Now()}
+			}()
 			r.Clients[client] = true
 		case client := <-r.Unregister:
 			// unregister an outgoing user
@@ -39,6 +48,10 @@ func (r *Room) Run() {
 			if _, ok := r.Clients[client]; ok {
 				// they are in, remove them
 				log.Printf("Unregister %s\n", client.Nickname)
+				// broadcast "left" message
+				go func() {
+					r.Broadcast <- Message{From: "SERVER", Content: fmt.Sprintf("---- <%s> left the room ----", client.Nickname), SentTime: time.Now()}
+				}()
 				delete(r.Clients, client)
 				close(client.Send)
 			}

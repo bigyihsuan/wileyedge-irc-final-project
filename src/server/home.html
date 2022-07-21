@@ -24,12 +24,14 @@
             }
 
             function formatTimeStamp(message) {
-                return `[${message.SentTime}]`
+                var date = new Date(Date.parse(message.SentTime))
+                var timestring = date.toTimeString().split(" ")[0]
+                return `[${timestring}]`
             }
 
             function formatMessage(message) {
-                // return `${formatTimeStamp(message)} ${formatNickname(message)} ${message.Content}`
-                return `${formatNickname(message)} ${message.Content}`
+                return `${formatTimeStamp(message)} ${formatNickname(message)} ${message.Content}`
+                    // return `${formatNickname(message)} ${message.Content}`
             }
 
             document.getElementById("nickname").value = nickname
@@ -55,8 +57,7 @@
                 };
                 conn.onmessage = function(evt) {
                     var messages = evt.data.trim().split('\n');
-                    // console.log(evt)
-                    // console.log(messages)
+                    console.log(evt)
                     for (var i = 0; i < messages.length; i++) {
                         var item = document.createElement("div");
                         var message = JSON.parse(messages[i] + "\n")
