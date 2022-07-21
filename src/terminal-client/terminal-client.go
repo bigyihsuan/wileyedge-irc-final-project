@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -13,6 +14,16 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+type Message struct {
+	From     string
+	Content  string
+	SentTime time.Time
+}
+
+func (m Message) String() string {
+	return "[" + m.SentTime.Local().Format("15:04:05") + "] " + "<" + m.From + "> " + m.Content
+}
 
 // location of the server
 var address = flag.String("server address", "localhost:8080", "address of the server")
@@ -48,36 +59,48 @@ func main() {
 	defer conn.Close()
 
 	done := make(chan struct{})
+
+	// start sending-receiving messages
+	// receiving messages
 	go func() {
 		defer close(done) // notify the outside world that we're done getting messages
 		for {
-			_, message, err := conn.ReadMessage()
+			_, message, err := conn.ReadMessage() // leech off of the broadcast channel
 			if err != nil {
 				log.Println("read: ", err)
 				return
 			}
-			log.Printf("received: %s", message)
+			var m Message
+			json.Unmarshal(message, &m)
+			fmt.Println(m.String())
 		}
 	}()
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	// start sending-receiving messages
-	// receiving messages
+	messageInput := make(chan string) // so the user can async input messages
 
+	go func(ch chan string) {
+		defer close(ch)
+		reader := bufio.NewReader(os.Stdin)
+		for {
+			s, err := reader.ReadString('\n')
+			if err != nil {
+				log.Fatal(err)
+				return
+			}
+			fmt.Fprint(os.Stdin, "\r")
+			ch <- s
+		}
+	}(messageInput)
+
+stdinloop:
 	for {
 		select {
 		case <-done:
 			// finish when no more messages
 			return
-		// case t := <-ticker.C:
-		// send a message containing the current time to the server
-		// err := conn.WriteMessage(websocket.TextMessage, []byte(t.String()))
-		// if err != nil {
-		// 	log.Println("write:", err)
-		// 	return
-		// }
 		case <-interrupt:
 			log.Println("interrupt")
 			// close connection
@@ -93,6 +116,16 @@ func main() {
 				// nop
 			}
 			return
+		case content, ok := <-messageInput:
+			// get the message content from the user
+			if !ok {
+				break stdinloop
+			} else {
+				content = strings.TrimSpace(content)
+				conn.WriteMessage(websocket.TextMessage, []byte(content))
+			}
+		case <-ticker.C:
+			// nop so we can wait for input
 		}
 	}
 
