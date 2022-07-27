@@ -3,6 +3,7 @@ package chatroom
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -14,13 +15,13 @@ import (
 // https://github.com/gorilla/websocket/blob/af47554f343b4675b30172ac301638d350db34a5/examples/chat/client.go#L16-L38
 const (
 	// Time allowed to write a message to the peer.
-	writeWait = 10 * time.Second
+	writeWait = time.Second * 1
 
 	// Time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
+	pongWait = time.Second
 
 	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
+	pingPeriod = (pongWait) / 10
 
 	// Maximum message size allowed from peer.
 	maxMessageSize = 512
@@ -41,13 +42,14 @@ type Client struct {
 	Uuid        uuid.UUID
 	Nickname    string
 	CurrentRoom *Room           // the room this client is in
-	Connection  *websocket.Conn // connection to the server
+	Connection  *websocket.Conn // connection to the CLIENT
 	Send        chan Message    // channel of outbound messages
 }
 
 func (c *Client) readSocket() {
 	// unregister and disconnect when done reading
 	defer func() {
+		log.Println(c.Nickname, "closing readSocket")
 		c.CurrentRoom.Unregister <- c
 		c.Connection.Close()
 	}()
@@ -69,12 +71,13 @@ func (c *Client) readSocket() {
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		log.Printf("client got message `%s` from %s\n", string(message), c.Uuid)
+		c.CurrentRoom.Logf("client got message `%s` from %s\n", string(message), c.Nickname)
 		sent := Message{
-			Uuid:     c.Uuid,
-			FromNick: c.Nickname,
-			Content:  string(message),
-			SentTime: time.Now(),
+			Uuid:       c.Uuid,
+			FromNick:   c.Nickname,
+			Content:    string(message),
+			SentTime:   time.Now(),
+			ServerName: c.CurrentRoom.RoomName,
 		}
 		c.CurrentRoom.Broadcast <- sent
 	}
@@ -84,6 +87,7 @@ func (c *Client) readSocket() {
 func (c *Client) writeSocket() {
 	ticker := time.NewTicker(pingPeriod) // tick every so often
 	defer func() {
+		log.Println(c.Nickname, "closing writeSocket")
 		ticker.Stop()
 		c.Connection.Close()
 	}()
@@ -94,11 +98,13 @@ func (c *Client) writeSocket() {
 			c.Connection.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// room closed the channel
+				log.Println(c.Nickname, "room closed channel")
 				c.Connection.WriteMessage(websocket.CloseMessage, []byte{})
 			}
 			w, err := c.Connection.NextWriter(websocket.TextMessage)
 			if err != nil {
 				// cannot write to the connection
+				log.Println(c.Nickname, "cannot write to connection")
 				return
 			}
 			// send the content of the message to the client
@@ -115,6 +121,7 @@ func (c *Client) writeSocket() {
 
 			if err := w.Close(); err != nil {
 				// cannot close the writer to the outbound queue
+				log.Println(c.Nickname, "cannot close outbound writer")
 				return
 			}
 		case <-ticker.C:
@@ -122,18 +129,36 @@ func (c *Client) writeSocket() {
 			c.Connection.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.Connection.WriteMessage(websocket.PingMessage, nil); err != nil {
 				// ping to the server failed
+				log.Println(c.Nickname, "failed to ping")
 				return
 			}
 		}
 	}
 }
 
-func (c Client) DirectMessage(message Message) {
+func (c Client) ServerDirectMessage(message Message) {
 	w, err := c.Connection.NextWriter(websocket.TextMessage)
 	if err != nil {
 		// cannot write to the connection
 		return
 	}
+	message.Content = "(DM) " + message.Content
+	// send the content of the message to the client
+	// w.Write(message.Content)
+	json.NewEncoder(w).Encode(message)
+	if err := w.Close(); err != nil {
+		// cannot close the writer to the outbound queue
+		return
+	}
+}
+
+func (c Client) DirectMessageToOtherClient(other Client, message Message) {
+	w, err := other.Connection.NextWriter(websocket.TextMessage)
+	if err != nil {
+		// cannot write to the connection
+		return
+	}
+	message.Content = fmt.Sprintf("(%s) ", other.Nickname) + message.Content
 	// send the content of the message to the client
 	// w.Write(message.Content)
 	json.NewEncoder(w).Encode(message)
@@ -153,7 +178,14 @@ func ServeWebSocket(room *Room, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nickname := r.URL.Query().Get("nickname")
-	log.Printf("Got client with nickname `%s`", nickname)
+	room.Logf("Got client with nickname `%s`", nickname)
+
+	if room.NicknameAlreadyExists(nickname) {
+		room.Logf("Nickname %v already exists, changing nickname...\n", nickname)
+		nickname = fmt.Sprintf("%s_%d", nickname, time.Now().Unix()%int64(len(room.Clients)))
+		room.Logf("Nickname is now %s\n", nickname)
+	}
+
 	client := &Client{
 		Nickname:    string(nickname),
 		CurrentRoom: room,

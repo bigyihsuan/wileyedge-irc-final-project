@@ -7,31 +7,89 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 )
 
-var rooms = make(map[uuid.UUID]*Room) // the list of channels
+var ActiveRooms = make(map[uuid.UUID]*Room)       // the list of channels
+var StringToRoomUUID = make(map[string]uuid.UUID) // convert a channel name to its uuid
+
+type IsInRoom bool
 
 // manages active clients, and broadcasting to active clients
 type Room struct {
-	Uuid       uuid.UUID        // unique room identifier
-	RoomName   string           // name of the room
-	Clients    map[*Client]bool // the list of registered clients
-	Broadcast  chan Message     // inbound messages from clients
-	Register   chan *Client     // register requests from clients
-	Unregister chan *Client     // unregister requests from clients
+	Uuid       uuid.UUID            // unique room identifier
+	RoomName   string               // name of the room
+	Clients    map[*Client]IsInRoom // the list of registered clients
+	Broadcast  chan Message         // inbound messages from clients
+	Register   chan *Client         // register requests from clients
+	Unregister chan *Client         // unregister requests from clients
+	SwitchRoom chan *RoomSwitch     // room switch requests from clients
+	isRunning  bool
+	Commands   CommandList
+}
+
+type RoomSwitch struct {
+	client     *Client
+	targetRoom *Room
 }
 
 func NewRoom(roomName string) *Room {
 	r := &Room{
 		Uuid:       uuid.New(),
 		RoomName:   roomName,
-		Clients:    make(map[*Client]bool),
+		Clients:    make(map[*Client]IsInRoom),
 		Broadcast:  make(chan Message),
 		Register:   make(chan *Client),
 		Unregister: make(chan *Client),
+		SwitchRoom: make(chan *RoomSwitch),
 	}
-	rooms[r.Uuid] = r
+	ActiveRooms[r.Uuid] = r
+	StringToRoomUUID[roomName] = r.Uuid
+	r.Commands = CommandList{
+		// create a new room
+		"make": {
+			Name:      "make",
+			Operation: makeRoom,
+		},
+		// list rooms, marking which one the client is in
+		"listrooms": {
+			Name:      "listrooms",
+			Operation: listRoom,
+		},
+		// join a room
+		"join": {
+			Name:      "join",
+			Operation: joinRoom,
+		},
+		// exit entirely
+		"exit": {
+			Name:      "exit",
+			Operation: exitRoom,
+		},
+		// list the users in the current room
+		"listusers": {
+			Name:      "listusers",
+			Operation: listUsers,
+		},
+		// list commands
+		"help": {
+			Name:      "help",
+			Operation: help,
+		},
+		// whisper: send a dm to another client
+		"whisper": {
+			Name:      "whisper",
+			Operation: whisper,
+		},
+	}
 	return r
+}
+
+func (r Room) Logf(format string, v ...any) {
+	log.Printf("[%v] %s", r.RoomName, fmt.Sprintf(format, v...))
+}
+func (r Room) Logln(v ...any) {
+	log.Printf("[%v] %s", r.RoomName, fmt.Sprintln(v...))
 }
 
 func (r Room) GetClientByUuid(uuid uuid.UUID) *Client {
@@ -42,14 +100,25 @@ func (r Room) GetClientByUuid(uuid uuid.UUID) *Client {
 	}
 	return nil
 }
+func (r Room) GetClientByNickname(nickname string) *Client {
+	for c := range r.Clients {
+		if c.Nickname == nickname {
+			return c
+		}
+	}
+	return nil
+}
 
 // run the server
 func (r *Room) Run() {
+	r.isRunning = true
+
+	r.Logln("Starting room")
 	for {
 		select {
 		case client := <-r.Register:
 			// register an incoming user
-			log.Printf("Register %s\n", client.Nickname)
+			r.Logf("Register %s\n", client.Nickname)
 			// broadcast "joined" message
 			go func() {
 				r.Broadcast <- r.serverMessage(fmt.Sprintf("---- <%s> joined %s ----", client.Nickname, r.RoomName))
@@ -60,26 +129,31 @@ func (r *Room) Run() {
 			// check if the user is actually in the room first
 			if _, ok := r.Clients[client]; ok {
 				// they are in, remove them
-				log.Printf("Unregister %s\n", client.Nickname)
+				r.Logf("Unregister %s\n", client.Nickname)
 				// broadcast "left" message
 				go func() {
-					r.Broadcast <- r.serverMessage(fmt.Sprintf("---- <%s> left %s ----", client.Nickname, r.RoomName))
+					r.Broadcast <- r.serverMessage(fmt.Sprintf("---- <%s> left %s (disconnected) ----", client.Nickname, r.RoomName))
 				}()
+				// remove from the client list
 				delete(r.Clients, client)
+				// close the senging channel
 				close(client.Send)
 			}
 		case message := <-r.Broadcast:
 			// a message just came in from some client
 			// check if it's a slash-command first
 			if message.IsCommand() {
-				log.Printf("Got command `%s` from %v\n", message.Content, message.Uuid)
+				r.Logf("Got command `%s` from %v\n", message.Content, message.FromNick)
 				command := message.ToCommand()
-				if commands.InCommandList(command.Name) {
+				if r.Commands.InCommandList(command.Name) {
 					callingClient := r.GetClientByUuid(command.Uuid)
-					err := commands[command.Name].Operation(r, callingClient, command.Args...)
-					if err != nil {
-						callingClient.DirectMessage(r.serverMessage(err.Error()))
-					}
+					callingClient.ServerDirectMessage(r.serverMessage(message.Content))
+					go func() {
+						err := r.Commands[command.Name].Operation(r, callingClient, command.Args...)
+						if err != nil {
+							callingClient.ServerDirectMessage(r.serverMessage(err.Error()))
+						}
+					}()
 				}
 			} else {
 				for client := range r.Clients {
@@ -87,17 +161,33 @@ func (r *Room) Run() {
 					// append the sender's username to the message
 					select {
 					case client.Send <- message:
-						log.Printf("Sent message from %s to %s\n", message.Uuid, client.Uuid)
+						r.Logf("Sent message from %s to %s\n", message.FromNick, client.Nickname)
 						// successful send
 						// nop
 					default:
 						// the client we are trying to send to doesn't exist
 						// remove them from our client list
-						log.Printf("%s is not logged in\n", client.Nickname)
+						r.Logf("%s is not logged in\n", client.Nickname)
 						close(client.Send)
 						delete(r.Clients, client)
 					}
 				}
+			}
+		case rs := <-r.SwitchRoom:
+			// a client wants to swithc rooms
+			if _, ok := r.Clients[rs.client]; ok {
+				// remove client from client list
+				delete(r.Clients, rs.client)
+				// send "left" message
+				go func() {
+					r.Broadcast <- r.serverMessage(fmt.Sprintf("---- <%s> left %s (switched rooms) ----", rs.client.Nickname, r.RoomName))
+				}()
+				// DON'T close the send channel, need for the next room
+				// physically swtich the room
+				rs.client.CurrentRoom = rs.targetRoom
+				// move the client into the new room
+				rs.targetRoom.Register <- rs.client
+				r.Logf("Successfully moved %v to %v\n", rs.client.Nickname, rs.targetRoom.RoomName)
 			}
 		}
 	}
@@ -105,25 +195,31 @@ func (r *Room) Run() {
 
 // a representation of a message, containing a source and its contents
 type Message struct {
-	Uuid     uuid.UUID `json:"Uuid"`     // the UUID of the user this message is from
-	FromNick string    `json:"FromNick"` // the nickname of the user this message is from
-	Content  string    `json:"Content"`  // the actual message
-	SentTime time.Time `json:"SentTime"`
+	Uuid       uuid.UUID `json:"Uuid"`       // the UUID of the user this message is from
+	FromNick   string    `json:"FromNick"`   // the nickname of the user this message is from
+	Content    string    `json:"Content"`    // the actual message
+	SentTime   time.Time `json:"SentTime"`   // when this message was sent
+	ServerName string    `json:"ServerName"` // the name of the server this message is being broadcasted to
 }
 
 func (m Message) IsCommand() bool {
 	return len(m.Content) > 0 && m.Content[0] == '/'
 }
+
+// splits a message into a command name and arguments
+// these arguments are a single string
 func (m Message) ToCommand() CalledCommand {
-	components := strings.Split(m.Content, " ")
+	components := strings.SplitN(m.Content, " ", 2)
 	command := CalledCommand{Uuid: m.Uuid}
 	for i, c := range components {
+		// get the command name
 		if i == 0 && c[0] == '/' {
-			command.Name = c[1:]
+			command.Name = strings.TrimLeft(c, "/")
 			break
 		}
 	}
 	command.Args = components[1:]
+	log.Println(command)
 	return command
 }
 
@@ -157,50 +253,166 @@ func (cl CommandList) InCommandList(commandName string) bool {
 	return ok
 }
 
-var commands = CommandList{
-	// create a new room
-	"make": {
-		Name: "make",
-		Operation: func(r *Room, c *Client, s ...string) *CommandError {
-			if len(s) != 1 {
-				return &CommandError{
-					CommandName: "make",
-					Reason:      fmt.Sprintf("Wrong number of arguments: want 1 (channel name), got %v", len(s)),
-				}
+func makeRoom(r *Room, c *Client, s ...string) *CommandError {
+	if len(s) != 1 {
+		return &CommandError{
+			CommandName: "make",
+			Reason:      fmt.Sprintf("Wrong number of arguments: want 1 (channel name), got %v", len(s)),
+		}
+	}
+	roomName := s[0]
+	newroom := NewRoom(roomName)
+	c.ServerDirectMessage(r.serverMessage(fmt.Sprintf("Successfully made new room `%s`", roomName)))
+	r.Logln(c.Nickname, fmt.Sprintf("made new room `%s`", newroom.RoomName))
+	return nil
+}
+
+func listRoom(r *Room, c *Client, s ...string) *CommandError {
+	var builder strings.Builder
+	builder.WriteString("\nChannels:\n")
+	builder.WriteString("---------\n")
+	for u, room := range ActiveRooms {
+		builder.WriteString(room.RoomName)
+		if u == c.CurrentRoom.Uuid {
+			builder.WriteString(" (* joined)")
+		}
+		builder.WriteString("\n")
+	}
+	c.ServerDirectMessage(r.serverMessage(builder.String()))
+	r.Logln(c.Nickname, "listed rooms")
+	// log.Println(builder.String())
+	return nil
+}
+
+func joinRoom(r *Room, c *Client, s ...string) *CommandError {
+	if len(s) != 1 {
+		return &CommandError{
+			CommandName: "join",
+			Reason:      fmt.Sprintf("Wrong number of arguments: want 1 (channel name), got %v", len(s)),
+		}
+	}
+	// see if the wanted room exists
+	nextRoom, ok := ActiveRooms[StringToRoomUUID[s[0]]]
+	if !ok {
+		return &CommandError{
+			CommandName: "join",
+			Reason:      fmt.Sprintf("Room `%v` does not exist", s),
+		}
+	}
+	if !nextRoom.isRunning {
+		r.Logln("running", nextRoom.RoomName)
+		go nextRoom.Run()
+	}
+	// room exists, we're all ok
+	// remove the client from the current room
+	// tell the client to switch to the new room
+	// switch message contains the new room name for the webclient to display
+	switchMessage, err := websocket.NewPreparedMessage(websocket.TextMessage, []byte(nextRoom.RoomName))
+	if err != nil {
+		r.Logf("Cannot make switch message for %v: %v\n", c.Nickname, err)
+		// reset state
+		r.Register <- c
+	}
+	err = c.Connection.WritePreparedMessage(switchMessage)
+	if err != nil {
+		r.Logf("Failed to send switch message to %v: %v", c.Nickname, err)
+	}
+	r.Logf("switching %s from this room", c.Nickname)
+	roomswitch := new(RoomSwitch)
+	roomswitch.client = c
+	roomswitch.targetRoom = nextRoom
+	go func() {
+		r.SwitchRoom <- roomswitch
+	}()
+	inroom, ok := r.Clients[c]
+	r.Logln("in the room:", inroom, ok)
+	return nil
+}
+
+func exitRoom(r *Room, c *Client, s ...string) *CommandError {
+	// force the client to leave and disconnect
+	r.Unregister <- c
+	c.Connection.Close()
+	return nil
+}
+
+func listUsers(r *Room, c *Client, s ...string) *CommandError {
+	var builder strings.Builder
+	builder.WriteString("\nUsers:\n")
+	builder.WriteString("---------\n")
+	for client, inRoom := range r.Clients {
+		if inRoom {
+			builder.WriteString(client.Nickname)
+			if client.Uuid == c.Uuid {
+				builder.WriteString(" (* you)")
 			}
-			NewRoom(s[0])
-			return nil
-		},
-	},
-	// list rooms, marking which one the client is in
-	"list": {
-		Name: "list",
-		Operation: func(r *Room, c *Client, s ...string) *CommandError {
-			var builder strings.Builder
-			builder.WriteString("Channels:\n")
-			builder.WriteString("---------\n")
-			for u, room := range rooms {
-				builder.WriteString(room.RoomName)
-				if u == c.CurrentRoom.Uuid {
-					builder.WriteString(" ***")
-				}
-				builder.WriteString("\n")
-			}
-			c.DirectMessage(r.serverMessage(builder.String()))
-			log.Println(c.Uuid)
-			log.Println(builder.String())
-			return nil
-		},
-	},
-	// join the room
-	// exit entirely
+			builder.WriteString("\n")
+		}
+	}
+	c.ServerDirectMessage(r.serverMessage(builder.String()))
+	r.Logln(c.Nickname, "listed users")
+	// log.Println(builder.String())
+	return nil
+}
+
+func help(r *Room, c *Client, s ...string) *CommandError {
+	var builder strings.Builder
+	builder.WriteString("\nAvailable Commands:\n")
+	builder.WriteString("-------------------\n")
+	for command := range r.Commands {
+		builder.WriteString(command)
+		builder.WriteString("\n")
+	}
+	c.ServerDirectMessage(r.serverMessage(builder.String()))
+	return nil
+}
+
+func whisper(r *Room, c *Client, s ...string) *CommandError {
+	// expected arguments:
+	// target nickname args[0]
+	// message contents args[1]
+	args := strings.SplitN(s[0], " ", 2)
+	if len(args) < 2 {
+		return &CommandError{
+			CommandName: "whisper",
+			Reason:      fmt.Sprintf("Wrong number of arguments: want 2 (nickname, contents), got %v args", len(args)),
+		}
+	}
+	targetName := args[0]
+	whisperContents := args[1]
+	target := r.GetClientByNickname(targetName)
+	if target == nil {
+		return &CommandError{
+			CommandName: "whisper",
+			Reason:      fmt.Sprintf("Target client %s does not exist", targetName),
+		}
+	}
+	c.DirectMessageToOtherClient(*target, Message{
+		Uuid:       c.Uuid,
+		FromNick:   c.Nickname,
+		Content:    whisperContents,
+		SentTime:   time.Now(),
+		ServerName: r.RoomName,
+	})
+
+	return nil
 }
 
 func (r Room) serverMessage(content string) Message {
 	return Message{
-		Uuid:     r.Uuid,
-		FromNick: "SERVER",
-		Content:  content,
-		SentTime: time.Now(),
+		Uuid:       r.Uuid,
+		FromNick:   fmt.Sprintf("{%s}", r.RoomName),
+		Content:    content,
+		SentTime:   time.Now(),
+		ServerName: r.RoomName,
 	}
+}
+
+func (r Room) NicknameAlreadyExists(nickname string) bool {
+	for client, isInRoom := range r.Clients {
+		if isInRoom && client.Nickname == nickname {
+			return true
+		}
+	}
+	return false
 }

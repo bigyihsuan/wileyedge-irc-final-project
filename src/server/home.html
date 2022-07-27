@@ -2,14 +2,18 @@
 <html lang="en">
 
 <head>
-    <title>Chat Example</title>
+    <title>IRC Chat</title>
     <script type="text/javascript">
+        const websocket_SwitchChannelMessage = 4000;
         window.onload = function() {
             var conn;
             // var nickname = document.getElementById("nickname");
             var msg = document.getElementById("msg");
             var log = document.getElementById("log");
-            var nickname = prompt("Enter nickname", "unknown")
+            var currentServer = document.getElementById("currentServer");
+            var nickname = prompt("Enter nickname", "unknown");
+
+            currentServer.innerText = "main";
 
             function appendLog(item) {
                 var doScroll = log.scrollTop > log.scrollHeight - log.clientHeight - 1;
@@ -17,21 +21,6 @@
                 if (doScroll) {
                     log.scrollTop = log.scrollHeight - log.clientHeight;
                 }
-            }
-
-            function formatNickname(message) {
-                return `<${message.From}>`
-            }
-
-            function formatTimeStamp(message) {
-                var date = new Date(Date.parse(message.SentTime))
-                var timestring = date.toTimeString().split(" ")[0]
-                return `[${timestring}]`
-            }
-
-            function formatMessage(message) {
-                return `${formatTimeStamp(message)} ${formatNickname(message)} ${message.Content}`
-                    // return `${formatNickname(message)} ${message.Content}`
             }
 
             document.getElementById("nickname").value = nickname
@@ -49,19 +38,31 @@
             };
 
             if (window["WebSocket"]) {
-                conn = new WebSocket("ws://" + document.location.host + "/ws" + "?nickname=" + nickname);
+                conn = new WebSocket("ws://" + document.location.host + `/ws/${currentServer.innerText}` + "?nickname=" + nickname);
+                console.log(conn.url)
                 conn.onclose = function(evt) {
+                    console.log(evt.code)
+                    console.log(evt)
+                        // check for channel-switch code
+                    if (evt.code == websocket_SwitchChannelMessage) {
+                        // switch channels by making a new connection
+                        console.log("switching channels")
+                        var nextChannel = evt.reason;
+                        // return makeConnection(nextChannel, nickname);
+                        return conn
+                    }
                     var item = document.createElement("div");
                     item.innerHTML = "<b>Connection closed.</b>";
                     appendLog(item);
                 };
                 conn.onmessage = function(evt) {
                     var messages = evt.data.trim().split('\n');
-                    console.log(evt)
+                    var currentServerName = currentServer.innerText
                     for (var i = 0; i < messages.length; i++) {
                         var item = document.createElement("div");
                         var message = JSON.parse(messages[i] + "\n")
-                            // console.log(i, messages[i].length, messages[i], message)
+                        currentServer.innerText = message.ServerName;
+                        console.log(message)
                         item.innerText = formatMessage(message);
                         appendLog(item);
                     }
@@ -70,6 +71,23 @@
                 var item = document.createElement("div");
                 item.innerHTML = "<b>Your browser does not support WebSockets.</b>";
                 appendLog(item);
+            }
+
+            function formatNickname(message) {
+                if (message.IsServerMessage) {
+                    return ``
+                }
+                return `<${message.FromNick}>`
+            }
+
+            function formatTimeStamp(message) {
+                var date = new Date(Date.parse(message.SentTime))
+                var timestring = date.toTimeString().split(" ")[0]
+                return `[${timestring}]`
+            }
+
+            function formatMessage(message) {
+                return [formatTimeStamp(message), formatNickname(message), message.Content].join(" ")
             }
         };
     </script>
@@ -87,12 +105,23 @@
             background: gray;
         }
         
+        #currentServerDiv {
+            margin: 0;
+            padding: 0.5em 0.5em 0.5em 0.5em;
+            position: absolute;
+            top: 0em;
+            left: 0.5em;
+            right: 0.5em;
+            bottom: 0.5em;
+            overflow: auto;
+        }
+        
         #log {
             background: white;
             margin: 0;
             padding: 0.5em 0.5em 0.5em 0.5em;
             position: absolute;
-            top: 0.5em;
+            top: 2em;
             left: 0.5em;
             right: 0.5em;
             bottom: 3em;
@@ -112,6 +141,7 @@
 </head>
 
 <body>
+    <div id="currentServerDiv">Current Server: <span id="currentServer"></span></div>
     <div id="log"></div>
     <form id="form">
         <input type="submit" value="Send" />
