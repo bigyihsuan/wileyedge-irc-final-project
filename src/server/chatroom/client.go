@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,13 +19,13 @@ const (
 	writeWait = time.Second * 1
 
 	// Time allowed to read the next pong message from the peer.
-	pongWait = time.Second
+	pongWait = time.Second * 1
 
 	// Send pings to peer with this period. Must be less than pongWait.
-	pingPeriod = (pongWait) / 10
+	pingPeriod = (pongWait * 9) / 10
 
 	// Maximum message size allowed from peer.
-	maxMessageSize = 512
+	maxMessageSize = 1024
 )
 
 var (
@@ -44,6 +45,7 @@ type Client struct {
 	CurrentRoom *Room           // the room this client is in
 	Connection  *websocket.Conn // connection to the CLIENT
 	Send        chan Message    // channel of outbound messages
+	KickSignal  chan *Room      // used for when a room kicks/force-exists the client
 }
 
 func (c *Client) readSocket() {
@@ -51,6 +53,7 @@ func (c *Client) readSocket() {
 	defer func() {
 		log.Println(c.Nickname, "closing readSocket")
 		c.CurrentRoom.Unregister <- c
+		c.CurrentRoom = nil
 		c.Connection.Close()
 	}()
 
@@ -132,6 +135,10 @@ func (c *Client) writeSocket() {
 				log.Println(c.Nickname, "failed to ping")
 				return
 			}
+		case room := <-c.KickSignal:
+			// room wants to kick us out
+			log.Println(c.Nickname, "kicked or exited by", room.RoomName)
+			return
 		}
 	}
 }
@@ -178,6 +185,7 @@ func ServeWebSocket(room *Room, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nickname := r.URL.Query().Get("nickname")
+	nickname = strings.ReplaceAll(nickname, " ", "_")
 	room.Logf("Got client with nickname `%s`", nickname)
 
 	if room.NicknameAlreadyExists(nickname) {
@@ -192,6 +200,7 @@ func ServeWebSocket(room *Room, w http.ResponseWriter, r *http.Request) {
 		Connection:  conn,
 		Send:        make(chan Message),
 		Uuid:        uuid.New(),
+		KickSignal:  make(chan *Room),
 	}
 	// enter the room
 	client.CurrentRoom.Register <- client

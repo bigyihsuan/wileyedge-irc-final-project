@@ -40,7 +40,7 @@ func main() {
 		log.Println(vars)
 		var room *chatroom.Room
 		if ro, ok := chatroom.ActiveRooms[chatroom.StringToRoomUUID[vars["servername"]]]; !ok {
-			log.Println("making new room", vars["servername"])
+			log.Println("main(): making new room", vars["servername"])
 			room = chatroom.NewRoom(vars["servername"])
 		} else {
 			room = ro

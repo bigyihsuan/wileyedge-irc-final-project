@@ -12,6 +12,7 @@ import (
 
 var ActiveRooms = make(map[uuid.UUID]*Room)       // the list of channels
 var StringToRoomUUID = make(map[string]uuid.UUID) // convert a channel name to its uuid
+var AllUsers = make(map[*Client]IsInRoom)
 
 type IsInRoom bool
 
@@ -71,6 +72,11 @@ func NewRoom(roomName string) *Room {
 			Name:      "listusers",
 			Operation: listUsers,
 		},
+		// list all users in the current server
+		"listallusers": {
+			Name:      "listallusers",
+			Operation: listAllUsers,
+		},
 		// list commands
 		"help": {
 			Name:      "help",
@@ -101,8 +107,8 @@ func (r Room) GetClientByUuid(uuid uuid.UUID) *Client {
 	return nil
 }
 func (r Room) GetClientByNickname(nickname string) *Client {
-	for c := range r.Clients {
-		if c.Nickname == nickname {
+	for c, isInRoom := range AllUsers {
+		if c.Nickname == nickname && isInRoom {
 			return c
 		}
 	}
@@ -124,6 +130,7 @@ func (r *Room) Run() {
 				r.Broadcast <- r.serverMessage(fmt.Sprintf("---- <%s> joined %s ----", client.Nickname, r.RoomName))
 			}()
 			r.Clients[client] = true
+			AllUsers[client] = true
 		case client := <-r.Unregister:
 			// unregister an outgoing user
 			// check if the user is actually in the room first
@@ -136,24 +143,32 @@ func (r *Room) Run() {
 				}()
 				// remove from the client list
 				delete(r.Clients, client)
-				// close the senging channel
+				AllUsers[client] = false
+				// close the sending channel
 				close(client.Send)
 			}
 		case message := <-r.Broadcast:
 			// a message just came in from some client
 			// check if it's a slash-command first
 			if message.IsCommand() {
+				// got a command
 				r.Logf("Got command `%s` from %v\n", message.Content, message.FromNick)
 				command := message.ToCommand()
+				callingClient := r.GetClientByUuid(command.Uuid)
+				// check if the commad is in the command list
 				if r.Commands.InCommandList(command.Name) {
-					callingClient := r.GetClientByUuid(command.Uuid)
+					// in the list, ok to run
 					callingClient.ServerDirectMessage(r.serverMessage(message.Content))
-					go func() {
-						err := r.Commands[command.Name].Operation(r, callingClient, command.Args...)
-						if err != nil {
-							callingClient.ServerDirectMessage(r.serverMessage(err.Error()))
-						}
-					}()
+					// go func() {
+					// call command
+					err := r.Commands[command.Name].Operation(r, callingClient, command.Args...)
+					if err != nil {
+						callingClient.ServerDirectMessage(r.serverMessage(err.Error()))
+					}
+					// }()
+				} else {
+					// otherwise say that the command doesn't exist
+					callingClient.ServerDirectMessage(r.serverMessage(fmt.Sprintf("Command not found: %s", message.Content)))
 				}
 			} else {
 				for client := range r.Clients {
@@ -332,7 +347,7 @@ func joinRoom(r *Room, c *Client, s ...string) *CommandError {
 func exitRoom(r *Room, c *Client, s ...string) *CommandError {
 	// force the client to leave and disconnect
 	r.Unregister <- c
-	c.Connection.Close()
+	c.KickSignal <- r
 	return nil
 }
 
@@ -350,8 +365,24 @@ func listUsers(r *Room, c *Client, s ...string) *CommandError {
 		}
 	}
 	c.ServerDirectMessage(r.serverMessage(builder.String()))
-	r.Logln(c.Nickname, "listed users")
-	// log.Println(builder.String())
+	r.Logln(c.Nickname, "listed room users")
+	return nil
+}
+func listAllUsers(r *Room, c *Client, s ...string) *CommandError {
+	var builder strings.Builder
+	builder.WriteString("\nAll Users:\n")
+	builder.WriteString("---------\n")
+	for client, inRoom := range AllUsers {
+		if inRoom {
+			builder.WriteString(client.Nickname)
+			if client.Uuid == c.Uuid {
+				builder.WriteString(" (* you)")
+			}
+			builder.WriteString("\n")
+		}
+	}
+	c.ServerDirectMessage(r.serverMessage(builder.String()))
+	r.Logln(c.Nickname, "listed all users")
 	return nil
 }
 
@@ -384,7 +415,7 @@ func whisper(r *Room, c *Client, s ...string) *CommandError {
 	if target == nil {
 		return &CommandError{
 			CommandName: "whisper",
-			Reason:      fmt.Sprintf("Target client %s does not exist", targetName),
+			Reason:      fmt.Sprintf("Target client %s does not exist, or is offline", targetName),
 		}
 	}
 	c.DirectMessageToOtherClient(*target, Message{

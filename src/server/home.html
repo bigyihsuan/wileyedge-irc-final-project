@@ -11,7 +11,7 @@
             var msg = document.getElementById("msg");
             var log = document.getElementById("log");
             var currentServer = document.getElementById("currentServer");
-            var nickname = prompt("Enter nickname", "unknown");
+            var nickname = prompt("Enter nickname", "anonymous");
 
             currentServer.innerText = "main";
 
@@ -77,7 +77,7 @@
                 if (message.IsServerMessage) {
                     return ``
                 }
-                return `<${message.FromNick}>`
+                return `@${message.FromNick}:`
             }
 
             function formatTimeStamp(message) {
@@ -137,16 +137,20 @@
             width: 100%;
             overflow: hidden;
         }
+        
+        .mono {
+            font-family: Consolas, 'Courier New', Courier, monospace;
+        }
     </style>
 </head>
 
 <body>
     <div id="currentServerDiv">Current Server: <span id="currentServer"></span></div>
-    <div id="log"></div>
+    <div id="log" class="mono"></div>
     <form id="form">
         <input type="submit" value="Send" />
         <input type="text" id="nickname" size="8" disabled=true />
-        <input type="text" id="msg" size="64" autofocus />
+        <input type="text" class="mono" id="msg" size="64" autofocus />
     </form>
 </body>
 
