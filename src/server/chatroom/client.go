@@ -48,6 +48,7 @@ type Client struct {
 	KickSignal  chan *Room      // used for when a room kicks/force-exists the client
 }
 
+// reads incoming messages from the webclient for relaying to the server
 func (c *Client) readSocket() {
 	// unregister and disconnect when done reading
 	defer func() {
@@ -82,11 +83,11 @@ func (c *Client) readSocket() {
 			SentTime:   time.Now(),
 			ServerName: c.CurrentRoom.RoomName,
 		}
-		c.CurrentRoom.Broadcast <- sent
+		c.CurrentRoom.Broadcast <- sent // send the message to the room
 	}
 }
 
-// moves messages from the current room to the websocket connection to the client
+// moves messages from the current room to the websocket connection to the webclient
 func (c *Client) writeSocket() {
 	ticker := time.NewTicker(pingPeriod) // tick every so often
 	defer func() {
@@ -143,6 +144,7 @@ func (c *Client) writeSocket() {
 	}
 }
 
+// sends a dm from the server to the web client
 func (c Client) ServerDirectMessage(message Message) {
 	w, err := c.Connection.NextWriter(websocket.TextMessage)
 	if err != nil {
@@ -159,6 +161,7 @@ func (c Client) ServerDirectMessage(message Message) {
 	}
 }
 
+// sends a dm from this client to some other client
 func (c Client) DirectMessageToOtherClient(other Client, message Message) {
 	w, err := other.Connection.NextWriter(websocket.TextMessage)
 	if err != nil {

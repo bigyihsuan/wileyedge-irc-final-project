@@ -26,14 +26,16 @@ type Room struct {
 	Unregister chan *Client         // unregister requests from clients
 	SwitchRoom chan *RoomSwitch     // room switch requests from clients
 	isRunning  bool
-	Commands   CommandList
+	Commands   CommandList // commands available to the server
 }
 
+// holds a client and the target room they are switching to
 type RoomSwitch struct {
 	client     *Client
 	targetRoom *Room
 }
 
+// create a new room with a given name
 func NewRoom(roomName string) *Room {
 	r := &Room{
 		Uuid:       uuid.New(),
@@ -99,6 +101,7 @@ func NewRoom(roomName string) *Room {
 	return r
 }
 
+// helper log functions
 func (r Room) Logf(format string, v ...any) {
 	log.Printf("[%v] %s", r.RoomName, fmt.Sprintf(format, v...))
 }
@@ -106,6 +109,7 @@ func (r Room) Logln(v ...any) {
 	log.Printf("[%v] %s", r.RoomName, fmt.Sprintln(v...))
 }
 
+// getting client by a criteria
 func (r Room) GetClientByUuid(uuid uuid.UUID) *Client {
 	for c := range r.Clients {
 		if c.Uuid == uuid {
@@ -197,7 +201,7 @@ func (r *Room) Run() {
 				}
 			}
 		case rs := <-r.SwitchRoom:
-			// a client wants to swithc rooms
+			// a client wants to switch rooms
 			if _, ok := r.Clients[rs.client]; ok {
 				// remove client from client list
 				delete(r.Clients, rs.client)
@@ -247,6 +251,7 @@ func (m Message) ToCommand() CalledCommand {
 	return command
 }
 
+// a command that got called by a client
 type CalledCommand struct {
 	Uuid uuid.UUID // the user running the command
 	Name string    // the name of the command
@@ -265,6 +270,7 @@ type CommandError struct {
 	Reason      string
 }
 
+// for fmt.Error() string
 func (ce CommandError) Error() string {
 	return fmt.Sprintf("Command %s failed: %s", ce.CommandName, ce.Reason)
 }
@@ -273,11 +279,13 @@ func (ce CommandError) Error() string {
 // these start with a slash
 type CommandList map[string]Command
 
+// checks if a command is available to run
 func (cl CommandList) InCommandList(commandName string) bool {
 	_, ok := cl[commandName]
 	return ok
 }
 
+// makes a new room, when given a room name
 func makeRoom(r *Room, c *Client, s string) *CommandError {
 	args := strings.SplitN(s, " ", 2)
 	if len(args) != 1 {
@@ -293,6 +301,7 @@ func makeRoom(r *Room, c *Client, s string) *CommandError {
 	return nil
 }
 
+// lists all open rooms
 func listRoom(r *Room, c *Client, s string) *CommandError {
 	var builder strings.Builder
 	builder.WriteString("\nChannels:\n")
@@ -310,6 +319,7 @@ func listRoom(r *Room, c *Client, s string) *CommandError {
 	return nil
 }
 
+// moves the calling client to a room with a given name
 func joinRoom(r *Room, c *Client, s string) *CommandError {
 	args := strings.SplitN(s, " ", 2)
 	if len(args) != 1 {
@@ -356,13 +366,14 @@ func joinRoom(r *Room, c *Client, s string) *CommandError {
 	return nil
 }
 
+// force the client to leave and disconnect
 func exitRoom(r *Room, c *Client, s string) *CommandError {
-	// force the client to leave and disconnect
 	r.Unregister <- c
 	c.KickSignal <- r
 	return nil
 }
 
+// list all users in the current room
 func listUsers(r *Room, c *Client, s string) *CommandError {
 	var builder strings.Builder
 	builder.WriteString("\nUsers:\n")
@@ -380,6 +391,8 @@ func listUsers(r *Room, c *Client, s string) *CommandError {
 	r.Logln(c.Nickname, "listed room users")
 	return nil
 }
+
+// list all users in the current server
 func listAllUsers(r *Room, c *Client, s string) *CommandError {
 	var builder strings.Builder
 	builder.WriteString("\nAll Users:\n")
@@ -398,6 +411,7 @@ func listAllUsers(r *Room, c *Client, s string) *CommandError {
 	return nil
 }
 
+// prints out help messages and lists available commands
 func help(r *Room, c *Client, s string) *CommandError {
 	var builder strings.Builder
 	var args []string
@@ -433,6 +447,7 @@ func help(r *Room, c *Client, s string) *CommandError {
 	return nil
 }
 
+// sends a direct message between the calling client and a target, given a nickname and a message
 func whisper(r *Room, c *Client, s string) *CommandError {
 	// expected arguments:
 	// target nickname args[0]
@@ -464,6 +479,7 @@ func whisper(r *Room, c *Client, s string) *CommandError {
 	return nil
 }
 
+// helper method to send a message originating from the server itself
 func (r Room) serverMessage(content string) Message {
 	return Message{
 		Uuid:       r.Uuid,
@@ -474,6 +490,7 @@ func (r Room) serverMessage(content string) Message {
 	}
 }
 
+// checks if the nickname already exists in the room
 func (r Room) NicknameAlreadyExists(nickname string) bool {
 	for client, isInRoom := range r.Clients {
 		if isInRoom && client.Nickname == nickname {
