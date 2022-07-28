@@ -28,7 +28,10 @@ func (m Message) String() string {
 }
 
 // location of the server
-var address = flag.String("server address", "localhost:8080", "address of the server")
+var address = flag.String("addr", "localhost:8080", "address of the server")
+
+// starting room name
+var roomName = flag.String("room", "main", "starting room")
 
 // https://github.com/gorilla/websocket/blob/master/examples/echo/client.go
 
@@ -48,7 +51,7 @@ func main() {
 	serverUrl := url.URL{
 		Scheme:   "ws", // websockets uses `ws` scheme
 		Host:     *address,
-		Path:     "/ws",
+		Path:     "/ws/" + *roomName,
 		RawQuery: "nickname=" + nickname, // send nickname to the server (as a query)
 	}
 	log.Printf("Connecting to `%s` as `%s`\n", serverUrl.String(), nickname)
@@ -69,8 +72,12 @@ func main() {
 		for {
 			_, message, err := conn.ReadMessage() // leech off of the broadcast channel
 			if err != nil {
-				log.Println("read: ", err)
-				return
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					log.Println("read: ", err)
+					return
+				} else {
+					return
+				}
 			}
 			var m Message
 			json.Unmarshal(message, &m)
@@ -89,8 +96,12 @@ func main() {
 		for {
 			s, err := reader.ReadString('\n')
 			if err != nil {
-				log.Fatal(err)
-				return
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					return
+				} else {
+					log.Fatal(err)
+					return
+				}
 			}
 			fmt.Fprint(os.Stdin, "\r")
 			ch <- s

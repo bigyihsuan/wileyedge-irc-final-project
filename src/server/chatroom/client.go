@@ -93,6 +93,7 @@ func (c *Client) writeSocket() {
 	defer func() {
 		log.Println(c.Nickname, "closing writeSocket")
 		ticker.Stop()
+		c.Connection.WriteControl(websocket.CloseNormalClosure, []byte{}, time.Now().Add(writeWait))
 		c.Connection.Close()
 	}()
 
