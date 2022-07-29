@@ -152,6 +152,7 @@ func (c Client) ServerDirectMessage(message Message) {
 		// cannot write to the connection
 		return
 	}
+	message.IsDirectMessage = true
 	message.Content = "(DM) " + message.Content
 	// send the content of the message to the client
 	// w.Write(message.Content)
@@ -170,6 +171,7 @@ func (c Client) DirectMessageToOtherClient(other Client, message Message) {
 		return
 	}
 	message.Content = fmt.Sprintf("(%s) ", other.Nickname) + message.Content
+	message.IsDirectMessage = true
 	// send the content of the message to the client
 	// w.Write(message.Content)
 	json.NewEncoder(w).Encode(message)

@@ -12,19 +12,32 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
+// coloring
+var ITALICS = color.New(color.Italic).SprintFunc()
+var USERNAME_COLOR = color.New(color.FgYellow).Add(color.Bold).SprintFunc()
+var TIME_COLOR = color.New(color.BgBlue).SprintFunc()
+
+// a representation of a message, containing a source and its contents
 type Message struct {
-	Uuid     uuid.UUID
-	FromNick string
-	Content  string
-	SentTime time.Time
+	Uuid            uuid.UUID `json:"Uuid"`            // the UUID of the user this message is from
+	FromNick        string    `json:"FromNick"`        // the nickname of the user this message is from
+	Content         string    `json:"Content"`         // the actual message
+	SentTime        time.Time `json:"SentTime"`        // when this message was sent
+	ServerName      string    `json:"ServerName"`      // the name of the server this message is being broadcasted to
+	IsDirectMessage bool      `json:"IsDirectMessage"` // whether this is a direct message or not
 }
 
 func (m Message) String() string {
-	return "[" + m.SentTime.Local().Format("15:04:05") + "] " + "<" + m.FromNick + "> " + m.Content
+	content := m.Content
+	if m.IsDirectMessage {
+		content = ITALICS(content)
+	}
+	return TIME_COLOR("["+m.SentTime.Local().Format("15:04:05")+"]") + " " + USERNAME_COLOR("<"+m.FromNick+">") + " " + content
 }
 
 // location of the server
@@ -95,6 +108,7 @@ func main() {
 
 	messageInput := make(chan string) // so the user can async input messages
 
+	// handle reading from stdin
 	go func(ch chan string) {
 		defer close(ch)
 		reader := bufio.NewReader(os.Stdin)

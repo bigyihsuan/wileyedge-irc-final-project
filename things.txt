@@ -1,2 +1,17 @@
 https://github.com/gorilla/mux
 https://github.com/gorilla/websocket
+
+
+terminal client
+- can join servers directly (via cli flag)
+- can set nickname (user prompt, or cli flag)
+- can type to chat/send commands
+- can receive messages from the room or other people
+- displays message time, what user a message is from, message contents
+- distinguishes between dm and regular message
+server:
+- commands (help, list users/rooms, make rooms, join rooms, "whisper" to other users
+- can make new rooms
+- can connect clients to rooms
+- can relay broadcast messages from 1 user to all other users
+
