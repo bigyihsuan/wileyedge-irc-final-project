@@ -33,6 +33,9 @@ var address = flag.String("addr", "localhost:8080", "address of the server")
 // starting room name
 var roomName = flag.String("room", "main", "starting room")
 
+// nickname
+var nickname = flag.String("nick", "anonymous", "nickname")
+
 // https://github.com/gorilla/websocket/blob/master/examples/echo/client.go
 
 func main() {
@@ -41,20 +44,22 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 
 	reader := bufio.NewReader(os.Stdin)
-	// enter a nickname
-	fmt.Print("Enter nickname: ")
-	nickname, _ := reader.ReadString('\n')
-	nickname = strings.TrimSpace(nickname)
-	nickname = url.QueryEscape(nickname)
+	if *nickname == "anonymous" {
+		// enter a nickname
+		fmt.Print("Enter nickname: ")
+		*nickname, _ = reader.ReadString('\n')
+		*nickname = strings.TrimSpace(*nickname)
+		*nickname = url.QueryEscape(*nickname)
+	}
 
 	// create url for request
 	serverUrl := url.URL{
 		Scheme:   "ws", // websockets uses `ws` scheme
 		Host:     *address,
 		Path:     "/ws/" + *roomName,
-		RawQuery: "nickname=" + nickname, // send nickname to the server (as a query)
+		RawQuery: "nickname=" + *nickname, // send nickname to the server (as a query)
 	}
-	log.Printf("Connecting to `%s` as `%s`\n", serverUrl.String(), nickname)
+	log.Printf("Connecting to `%s` as `%s`\n", serverUrl.String(), *nickname)
 
 	// create a websocket connection to the server
 	conn, _, err := websocket.DefaultDialer.Dial(serverUrl.String(), nil)

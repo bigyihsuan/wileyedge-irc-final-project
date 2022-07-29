@@ -11,6 +11,7 @@
 
 ## Client
 
+- [ ] Client implemented in Go
 - [x] Ask for a nickname
 - [x] Usernames are unique to a session
 - [x] Clients should have a globally unique ID
@@ -39,3 +40,9 @@ Task 2) send message to selected Client (done)
 - Need to be able to run multiple instances of the server
 - Each server instance needs to be able to talk to each other
 - All servers' rooms are a shared pool of rooms
+
+- talking in group chat is one service
+- DM is another service
+- separate into 2 different urls?
+  - `/ws/{servername}` for public chat
+  - `/ws/{targetname}/{yourname}` for a private dm between `yourname` and `targetname`

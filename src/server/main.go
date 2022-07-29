@@ -29,11 +29,58 @@ func main() {
 	r := mux.NewRouter()
 	main := chatroom.NewRoom("main")
 	go main.Run()
+	// serve the web page for the web client
 	r.HandleFunc("/", serveHome)
 	// r.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 	// 	log.Println("/ws", r.URL)
 	// 	chatroom.ServeWebSocket(main, w, r)
 	// })
+
+	// for private messaging people
+	// sourcename is you
+	// targetname is the person you're sending the dms to
+	r.HandleFunc("/ws/{sourcename}/{targetname}", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("/ws/{servername}", r.URL)
+		vars := mux.Vars(r)
+		log.Println(vars)
+		// check if a room for this pair exists
+		// this room is called `targetname-sourcename` and `sourcename-targetname`
+		// both names point to the same room
+		srctar := vars["sourcename"] + "-" + vars["targetname"]
+		tarsrc := vars["targetname"] + "-" + vars["sourcename"]
+		srctar_uuid, srctar_ok := chatroom.StringToRoomUUID[srctar]
+		tarsrc_uuid, tarsrc_ok := chatroom.StringToRoomUUID[tarsrc]
+
+		switch {
+		case tarsrc_ok && srctar_ok:
+			// both exist, send the client to the tarsrc room
+			tarsrc_room := chatroom.ActiveRooms[tarsrc_uuid]
+			go tarsrc_room.Run()
+			chatroom.ServeWebSocket(tarsrc_room, w, r)
+		case tarsrc_ok && !srctar_ok:
+			// only tarsrc exists, set the keys appropiately
+			tarsrc_room := chatroom.ActiveRooms[tarsrc_uuid]
+			chatroom.StringToRoomUUID[srctar] = tarsrc_room.Uuid
+			go tarsrc_room.Run()
+			chatroom.ServeWebSocket(tarsrc_room, w, r)
+		case !tarsrc_ok && srctar_ok:
+			// only srctar exists, set the keys appropiately
+			srctar_room := chatroom.ActiveRooms[srctar_uuid]
+			chatroom.StringToRoomUUID[tarsrc] = srctar_room.Uuid
+			go srctar_room.Run()
+			chatroom.ServeWebSocket(srctar_room, w, r)
+		default:
+			// neither key exists, create a new room
+			room := chatroom.NewRoom(tarsrc)
+			chatroom.ActiveRooms[room.Uuid] = room
+			chatroom.StringToRoomUUID[tarsrc] = room.Uuid
+			chatroom.StringToRoomUUID[srctar] = room.Uuid
+			go room.Run()
+			chatroom.ServeWebSocket(room, w, r)
+		}
+	})
+
+	// actual websocket connection for the client to communicate with the server
 	r.HandleFunc("/ws/{servername}", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("/ws/{servername}", r.URL)
 		vars := mux.Vars(r)
