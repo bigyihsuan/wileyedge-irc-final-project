@@ -41,7 +41,7 @@ func (m Message) String() string {
 }
 
 // location of the server
-var address = flag.String("addr", "localhost:8080", "address of the server")
+var address = flag.String("host", "localhost:8080", "address of the server")
 
 // starting room name
 var roomName = flag.String("room", "main", "starting room")
