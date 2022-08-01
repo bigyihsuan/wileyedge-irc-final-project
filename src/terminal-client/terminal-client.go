@@ -69,7 +69,7 @@ func main() {
 	serverUrl := url.URL{
 		Scheme:   "ws", // websockets uses `ws` scheme
 		Host:     *address,
-		Path:     "/ws/" + *roomName,
+		Path:     "/ws/client/" + *roomName,
 		RawQuery: "nickname=" + *nickname, // send nickname to the server (as a query)
 	}
 	log.Printf("Connecting to `%s` as `%s`\n", serverUrl.String(), *nickname)

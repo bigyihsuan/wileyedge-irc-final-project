@@ -1,15 +1,27 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
-	"irc/chatroom"
+	"fmt"
+	"irc-final-project/chatroom"
 	"log"
 	"net/http"
+	"net/url"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/websocket"
 )
 
+type name_uuid struct {
+	Name string    `json:"Name"`
+	Uuid uuid.UUID `json:"Uuid"`
+}
+
 var addr = flag.String("addr", ":8080", "http service address")
+var hub = flag.String("hub", "", "the address of the hub server")
+var serverName = flag.String("name", "server", "the name of this server")
 
 func serveHome(w http.ResponseWriter, r *http.Request) {
 	log.Println("serveHome", r.URL)
@@ -26,20 +38,51 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
+	serverUuid, _ := uuid.NewUUID()
 	r := mux.NewRouter()
-	main := chatroom.NewRoom("main")
+	main := chatroom.NewRoom(*serverName + "_main")
+	// if hub arg is given, then connect to the hub's server
+	if *hub != "" {
+		hubUrl := url.URL{
+			Scheme: "ws",
+			Host:   *hub,
+			Path:   fmt.Sprintf("/ws/server/%s/%s", url.PathEscape(main.Uuid.String()), *serverName),
+		}
+		log.Println("connecting to hub:", *hub, hubUrl.String())
+
+		// establish connection with the hub
+		conn, _, err := websocket.DefaultDialer.Dial(hubUrl.String(), nil)
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+		hubServer := chatroom.Server{
+			Conn: conn,
+		}
+		// get the uuid and name of the hub
+		var pair name_uuid
+		conn.ReadJSON(&pair)
+		hubServer.Name = pair.Name
+		hubServer.Uuid = pair.Uuid
+	}
 	go main.Run()
+
 	// serve the web page for the web client
 	r.HandleFunc("/", serveHome)
-	// r.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-	// 	log.Println("/ws", r.URL)
-	// 	chatroom.ServeWebSocket(main, w, r)
-	// })
+
+	// server-only connection to communicate between servers
+	// the `{uuid}` field is the uuid of the server instance that's connecting to this one
+	r.HandleFunc("/ws/server/{uuid}/{serverName}", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("/ws/server/{uuid}/{serverName}", r.URL)
+		// send over the needed information to the remote server
+		json.NewEncoder(w).Encode(name_uuid{Name: *serverName, Uuid: serverUuid})
+		// chatroom.ServeWebSocket(main, w, r)
+	})
 
 	// for private messaging people
 	// sourcename is you
 	// targetname is the person you're sending the dms to
-	r.HandleFunc("/ws/{sourcename}/{targetname}", func(w http.ResponseWriter, r *http.Request) {
+	r.HandleFunc("/ws/client/{sourcename}/{targetname}", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("/ws/{servername}", r.URL)
 		vars := mux.Vars(r)
 		log.Println(vars)
@@ -81,7 +124,7 @@ func main() {
 	})
 
 	// actual websocket connection for the client to communicate with the server
-	r.HandleFunc("/ws/{servername}", func(w http.ResponseWriter, r *http.Request) {
+	r.HandleFunc("/ws/client/{servername}", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("/ws/{servername}", r.URL)
 		vars := mux.Vars(r)
 		log.Println(vars)

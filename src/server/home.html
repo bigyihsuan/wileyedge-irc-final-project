@@ -38,7 +38,7 @@
             };
 
             if (window["WebSocket"]) {
-                conn = new WebSocket("ws://" + document.location.host + `/ws/${currentServer.innerText}` + "?nickname=" + nickname);
+                conn = new WebSocket("ws://" + document.location.host + `/ws/client/${currentServer.innerText}` + "?nickname=" + nickname);
                 console.log(conn.url)
                 conn.onclose = function(evt) {
                     console.log(evt.code)

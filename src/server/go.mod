@@ -1,4 +1,4 @@
-module irc
+module irc-final-project
 
 go 1.18
 

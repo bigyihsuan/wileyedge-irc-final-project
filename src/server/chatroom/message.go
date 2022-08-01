@@ -10,12 +10,13 @@ import (
 
 // a representation of a message, containing a source and its contents
 type Message struct {
-	Uuid            uuid.UUID `json:"Uuid"`            // the UUID of the user this message is from
-	FromNick        string    `json:"FromNick"`        // the nickname of the user this message is from
-	Content         string    `json:"Content"`         // the actual message
-	SentTime        time.Time `json:"SentTime"`        // when this message was sent
-	ServerName      string    `json:"ServerName"`      // the name of the server this message is being broadcasted to
-	IsDirectMessage bool      `json:"IsDirectMessage"` // whether this is a direct message or not
+	Uuid                  uuid.UUID `json:"Uuid"`                  // the UUID of the user this message is from
+	FromNick              string    `json:"FromNick"`              // the nickname of the user this message is from
+	Content               string    `json:"Content"`               // the actual message
+	SentTime              time.Time `json:"SentTime"`              // when this message was sent
+	RoomName              string    `json:"RoomName"`              // the name of the server this message is being broadcasted to
+	IsDirectMessage       bool      `json:"IsDirectMessage"`       // whether this is a direct message or not
+	DestinationServerUuid uuid.UUID `json:"DestinationServerUuid"` // the destination server's uuid
 }
 
 func (m Message) IsCommand() bool {

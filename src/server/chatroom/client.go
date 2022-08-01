@@ -77,11 +77,11 @@ func (c *Client) readSocket() {
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
 		c.CurrentRoom.Logf("client got message `%s` from %s\n", string(message), c.Nickname)
 		sent := Message{
-			Uuid:       c.Uuid,
-			FromNick:   c.Nickname,
-			Content:    string(message),
-			SentTime:   time.Now(),
-			ServerName: c.CurrentRoom.RoomName,
+			Uuid:     c.Uuid,
+			FromNick: c.Nickname,
+			Content:  string(message),
+			SentTime: time.Now(),
+			RoomName: c.CurrentRoom.RoomName,
 		}
 		c.CurrentRoom.Broadcast <- sent // send the message to the room
 	}

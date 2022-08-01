@@ -16,15 +16,16 @@ type IsInRoom bool
 
 // manages active clients, and broadcasting to active clients
 type Room struct {
-	Uuid       uuid.UUID            // unique room identifier
-	RoomName   string               // name of the room
-	Clients    map[*Client]IsInRoom // the list of registered clients
-	Broadcast  chan Message         // inbound messages from clients
-	Register   chan *Client         // register requests from clients
-	Unregister chan *Client         // unregister requests from clients
-	SwitchRoom chan *RoomSwitch     // room switch requests from clients
-	isRunning  bool
-	Commands   CommandList // commands available to the server
+	Uuid         uuid.UUID            // unique room identifier
+	RoomName     string               // name of the room
+	Clients      map[*Client]IsInRoom // the list of registered clients
+	Broadcast    chan Message         // inbound messages from clients
+	Register     chan *Client         // register requests from clients
+	Unregister   chan *Client         // unregister requests from clients
+	SwitchRoom   chan *RoomSwitch     // room switch requests from clients
+	Commands     CommandList          // commands available to the server
+	ParentServer Server               // the server this room is in
+	isRunning    bool
 }
 
 type PrivateRoom struct {
@@ -181,7 +182,7 @@ func (r Room) serverMessage(content string) Message {
 		FromNick:        fmt.Sprintf("{%s}", r.RoomName),
 		Content:         content,
 		SentTime:        time.Now(),
-		ServerName:      r.RoomName,
+		RoomName:        r.RoomName,
 		IsDirectMessage: true,
 	}
 }

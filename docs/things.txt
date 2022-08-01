@@ -9,6 +9,7 @@ terminal client
 - can receive messages from the room or other people
 - displays message time, what user a message is from, message contents
 - distinguishes between dm and regular message
+
 server:
 - commands (help, list users/rooms, make rooms, join rooms, "whisper" to other users
 - can make new rooms

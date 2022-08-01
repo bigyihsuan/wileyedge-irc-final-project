@@ -284,7 +284,7 @@ func whisper(r *Room, c *Client, s string) *CommandError {
 		FromNick:        c.Nickname,
 		Content:         whisperContents,
 		SentTime:        time.Now(),
-		ServerName:      r.RoomName,
+		RoomName:        r.RoomName,
 		IsDirectMessage: true,
 	})
 
