@@ -53,16 +53,29 @@ func (s Server) ChildContainsRoom(roomInfo RoomInfo) *RemoteServer {
 	}
 	return nil
 }
+func (s Server) ChildContainsRoomWithName(roomName string) *RemoteServer {
+	for _, childServer := range s.ChildServers {
+		for childRoom := range childServer.AvailableRooms {
+			if childRoom.Name == roomName {
+				return childServer
+			}
+		}
+	}
+	return nil
+}
 
 // listen for messages from the remote hub parent server and relay them to either:
-//	- the local rooms (highest priority)
-//	- the child servers
-//	- the parent server (lowest priority)
+//   - the local rooms (highest priority)
+//   - the child servers
+//   - the parent server (lowest priority)
+//
 // in that order
 func (s Server) RelayMessages() {
 	defer func() {
 		log.Println(s.Name, "closing RelayMessages")
-		s.ParentServer.Conn.Close()
+		if s.ParentServer != nil {
+			s.ParentServer.Conn.Close()
+		}
 	}()
 	var message Message
 	var ok bool
@@ -128,6 +141,13 @@ func (s Server) NewRoom(roomName string) *Room {
 	s.LocalRooms[room.RoomInfo()] = room
 	return room
 }
+func (s Server) ServerInfo() ServerInfo {
+	return ServerInfo{
+		Name: s.Name,
+		Uuid: s.Uuid,
+		Conn: nil,
+	}
+}
 
 type AvailableRooms map[RoomInfo]bool
 
@@ -149,17 +169,27 @@ type RemoteServer struct {
 }
 
 func NewRemoteServer(si ServerInfo) *RemoteServer {
-	var rs RemoteServer
-	rs.ServerInfo = si
+	rs := new(RemoteServer)
+	rs.ServerInfo.Name = si.Name
+	rs.ServerInfo.Uuid = si.Uuid
+	rs.ServerInfo.Conn = si.Conn
 	rs.AvailableRooms = make(AvailableRooms)
 	rs.InboundMessages = make(chan Message)
 	rs.OutboundMessages = make(chan Message)
 	rs.LocalboundMessages = make(chan Message)
-	return &rs
+	return rs
 }
 
 func (rs RemoteServer) ContainsRoom(roomInfo RoomInfo) bool {
 	return rs.AvailableRooms[roomInfo]
+}
+func (rs RemoteServer) ContainsRoomWithName(roomName string) bool {
+	for roomInfo := range rs.AvailableRooms {
+		if roomInfo.Name == roomName {
+			return true
+		}
+	}
+	return false
 }
 
 // get a message from the remote server's socket

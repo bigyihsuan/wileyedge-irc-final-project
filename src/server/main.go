@@ -20,8 +20,9 @@ type server_init_info struct {
 }
 
 var addr = flag.String("addr", ":8080", "http service address")
-var hub = flag.String("hub", "", "the address of the hub server")
+var parent = flag.String("parent", "", "the address of the parent server")
 var serverName = flag.String("name", "server", "the name of this server")
+var mainRoomName = flag.String("room", "", "the name of the initial room")
 
 func serveHome(w http.ResponseWriter, r *http.Request) {
 	log.Println("serveHome", r.URL)
@@ -39,34 +40,43 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 func main() {
 	// pre-room run setup
 	flag.Parse()
-
-	var thisServer chatroom.Server
-
+	thisServer := new(chatroom.Server)
+	var firstRoomName string
+	log.Println("setting up server")
 	serverUuid, _ := uuid.NewUUID()
-
 	thisServer.Name = *serverName
 	thisServer.Uuid = serverUuid
 	thisServer.LocalRooms = make(map[chatroom.RoomInfo]*chatroom.Room)
 	thisServer.ChildServers = make(map[chatroom.ServerInfo]*chatroom.RemoteServer)
+	thisServer.ParentServer = chatroom.NewRemoteServer(thisServer.ServerInfo())
 
 	r := mux.NewRouter()
-	main := thisServer.NewRoom(*serverName + "_main")
-	// if hub arg is given, then connect to the hub's server
-	if *hub != "" {
-		hubUrl := url.URL{
+
+	if *mainRoomName != "" {
+		firstRoomName = *mainRoomName
+	} else {
+		firstRoomName = *serverName + "_main"
+	}
+
+	main := thisServer.NewRoom(firstRoomName)
+	// if parent arg is given, then connect to the parent's server
+	if *parent != "" {
+		log.Println("parent server desired")
+		parentUrl := url.URL{
 			Scheme: "ws",
-			Host:   *hub,
+			Host:   *parent,
 			Path:   fmt.Sprintf("/ws/server/%s/%s", url.PathEscape(main.Uuid.String()), *serverName),
 		}
-		log.Println("connecting to hub:", *hub, hubUrl.String())
+		log.Println("connecting to parent server:", *parent, parentUrl.String())
 
-		// establish connection with the hub
-		conn, _, err := websocket.DefaultDialer.Dial(hubUrl.String(), nil)
+		// establish connection with the parent
+		conn, _, err := websocket.DefaultDialer.Dial(parentUrl.String(), nil)
 		if err != nil {
 			log.Fatal(err)
 			return
 		}
-		// get the uuid and name of the hub
+		log.Println("connected to parent server")
+		// get the uuid and name of the parent
 		var info server_init_info
 		conn.ReadJSON(&info)
 		log.Println(info)
@@ -78,10 +88,13 @@ func main() {
 			AvailableRooms: thisServer.AvailableRooms(),
 		})
 		log.Println("new parent server", serverInfo.Name, serverInfo.Uuid)
+		thisServer.ParentServer = chatroom.NewRemoteServer(serverInfo)
+		thisServer.ParentServer.AvailableRooms = info.AvailableRooms
+		thisServer.ParentServer.Conn = conn
 	}
 
 	// start expecting messages to/from other servers
-	// go thisServer.RelayMessages()
+	go thisServer.RelayMessages()
 	// start up the main room
 	go main.Run()
 
@@ -92,18 +105,21 @@ func main() {
 	// the `{uuid}` field is the uuid of the server instance that's connecting to this one
 	r.HandleFunc("/ws/server/{uuid}/{serverName}", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("/ws/server/{uuid}/{serverName}", r.URL)
+		log.Println("another server wants this to be a parent")
 		// send over the needed information to the remote server
 		conn, err := chatroom.Upgrader.Upgrade(w, r, nil)
-		defer func() { conn.Close() }()
 		if err != nil {
 			log.Println(err)
 			return
 		}
+		defer func() { conn.Close() }()
+		log.Println("connected to the child")
 		conn.WriteJSON(server_init_info{
 			Name:           *serverName,
 			Uuid:           serverUuid,
 			AvailableRooms: thisServer.AvailableRooms(),
 		})
+		log.Println("wrote to the child")
 		// get information of the child
 		var info server_init_info
 		conn.ReadJSON(&info)
@@ -160,20 +176,44 @@ func main() {
 
 	// actual websocket connection for the client to communicate with the server
 	r.HandleFunc("/ws/client/{servername}", func(w http.ResponseWriter, r *http.Request) {
-		log.Println("/ws/{servername}", r.URL)
+		log.Println("/ws/client/{servername}", r.URL)
 		vars := mux.Vars(r)
 		log.Println(vars)
 		var room *chatroom.Room
-		if ro, ok := chatroom.ActiveRooms[chatroom.StringToRoomUUID[vars["servername"]]]; !ok {
-			log.Println("main(): making new room", vars["servername"])
-			room = chatroom.NewRoom(vars["servername"])
-			thisServer.LocalRooms[room.RoomInfo()] = room
-		} else {
+		if ro := thisServer.RoomWithNameExistsLocally(vars["servername"]); ro != nil {
 			room = ro
+		} else if child := thisServer.ChildContainsRoomWithName(vars["servername"]); child != nil {
+			// punt request to the child
+			redirectUrl := url.URL{
+				Scheme:   "http",
+				Host:     child.Conn.RemoteAddr().String(),
+				Path:     r.URL.Path,
+				RawQuery: r.URL.RawQuery,
+			}
+			log.Println("punt to child", redirectUrl.String())
+			go http.Redirect(w, r, redirectUrl.String(), http.StatusFound)
+			return
+		} else if thisServer.ParentServer != nil && thisServer.ParentServer.ContainsRoomWithName(vars["servername"]) {
+			// punt request up to the parent
+			redirectUrl := url.URL{
+				Scheme:   "http",
+				Host:     thisServer.ParentServer.Conn.RemoteAddr().String(),
+				Path:     r.URL.Path,
+				RawQuery: r.URL.RawQuery,
+			}
+			log.Println("punt to parent", redirectUrl.String())
+			go http.Redirect(w, r, redirectUrl.String(), http.StatusFound)
+			return
+		} else {
+			// log.Println(ro, child, thisServer.ParentServer)
+			// here, children, AND parent don't have this room, make it locally
+			log.Println("main(): making new room", vars["servername"])
+			room = thisServer.NewRoom(vars["servername"])
 		}
 		go room.Run()
 		chatroom.ServeWebSocket(room, w, r)
 	})
+
 	err := http.ListenAndServe(*addr, r)
 	if err != nil {
 		log.Fatal("ListenAndServe: ", err)
