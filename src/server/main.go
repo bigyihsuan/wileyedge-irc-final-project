@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"irc-final-project/chatroom"
@@ -14,9 +13,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type name_uuid struct {
-	Name string    `json:"Name"`
-	Uuid uuid.UUID `json:"Uuid"`
+type server_init_info struct {
+	Name           string                     `json:"Name"`
+	Uuid           uuid.UUID                  `json:"Uuid"`
+	AvailableRooms map[chatroom.RoomInfo]bool `json:"AvailableRooms"`
 }
 
 var addr = flag.String("addr", ":8080", "http service address")
@@ -37,10 +37,20 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// pre-room run setup
 	flag.Parse()
+
+	var thisServer chatroom.Server
+
 	serverUuid, _ := uuid.NewUUID()
+
+	thisServer.Name = *serverName
+	thisServer.Uuid = serverUuid
+	thisServer.LocalRooms = make(map[chatroom.RoomInfo]*chatroom.Room)
+	thisServer.ChildServers = make(map[chatroom.ServerInfo]*chatroom.RemoteServer)
+
 	r := mux.NewRouter()
-	main := chatroom.NewRoom(*serverName + "_main")
+	main := thisServer.NewRoom(*serverName + "_main")
 	// if hub arg is given, then connect to the hub's server
 	if *hub != "" {
 		hubUrl := url.URL{
@@ -56,15 +66,23 @@ func main() {
 			log.Fatal(err)
 			return
 		}
-		hubServer := chatroom.Server{
-			Conn: conn,
-		}
 		// get the uuid and name of the hub
-		var pair name_uuid
-		conn.ReadJSON(&pair)
-		hubServer.Name = pair.Name
-		hubServer.Uuid = pair.Uuid
+		var info server_init_info
+		conn.ReadJSON(&info)
+		log.Println(info)
+		serverInfo := chatroom.ServerInfo{Name: info.Name, Uuid: info.Uuid, Conn: conn}
+		thisServer.ParentServer = chatroom.NewRemoteServer(serverInfo)
+		conn.WriteJSON(server_init_info{
+			Name:           thisServer.Name,
+			Uuid:           thisServer.Uuid,
+			AvailableRooms: thisServer.AvailableRooms(),
+		})
+		log.Println("new parent server", serverInfo.Name, serverInfo.Uuid)
 	}
+
+	// start expecting messages to/from other servers
+	// go thisServer.RelayMessages()
+	// start up the main room
 	go main.Run()
 
 	// serve the web page for the web client
@@ -75,8 +93,24 @@ func main() {
 	r.HandleFunc("/ws/server/{uuid}/{serverName}", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("/ws/server/{uuid}/{serverName}", r.URL)
 		// send over the needed information to the remote server
-		json.NewEncoder(w).Encode(name_uuid{Name: *serverName, Uuid: serverUuid})
-		// chatroom.ServeWebSocket(main, w, r)
+		conn, err := chatroom.Upgrader.Upgrade(w, r, nil)
+		defer func() { conn.Close() }()
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		conn.WriteJSON(server_init_info{
+			Name:           *serverName,
+			Uuid:           serverUuid,
+			AvailableRooms: thisServer.AvailableRooms(),
+		})
+		// get information of the child
+		var info server_init_info
+		conn.ReadJSON(&info)
+		log.Println(info)
+		serverInfo := chatroom.ServerInfo{Name: info.Name, Uuid: info.Uuid, Conn: conn}
+		thisServer.ChildServers[serverInfo] = chatroom.NewRemoteServer(serverInfo)
+		log.Println("new child server", serverInfo.Name, serverInfo.Uuid)
 	})
 
 	// for private messaging people
@@ -118,6 +152,7 @@ func main() {
 			chatroom.ActiveRooms[room.Uuid] = room
 			chatroom.StringToRoomUUID[tarsrc] = room.Uuid
 			chatroom.StringToRoomUUID[srctar] = room.Uuid
+			thisServer.LocalRooms[room.RoomInfo()] = room
 			go room.Run()
 			chatroom.ServeWebSocket(room, w, r)
 		}
@@ -132,6 +167,7 @@ func main() {
 		if ro, ok := chatroom.ActiveRooms[chatroom.StringToRoomUUID[vars["servername"]]]; !ok {
 			log.Println("main(): making new room", vars["servername"])
 			room = chatroom.NewRoom(vars["servername"])
+			thisServer.LocalRooms[room.RoomInfo()] = room
 		} else {
 			room = ro
 		}

@@ -1,6 +1,7 @@
 package chatroom
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -24,8 +25,25 @@ type Room struct {
 	Unregister   chan *Client         // unregister requests from clients
 	SwitchRoom   chan *RoomSwitch     // room switch requests from clients
 	Commands     CommandList          // commands available to the server
-	ParentServer Server               // the server this room is in
+	ParentServer *Server              // the server this room is in
 	isRunning    bool
+}
+
+type RoomInfo struct {
+	Uuid uuid.UUID `json:"Uuid"`
+	Name string    `json:"Name"`
+}
+
+// for encoding.TextMarshaller
+func (ri RoomInfo) MarshalText() (text []byte, err error) {
+	type noMethod RoomInfo
+	return json.Marshal(noMethod(ri))
+}
+
+// for encoding.TextMarshaller
+func (ri *RoomInfo) UnmarshalText(text []byte) (err error) {
+	type noMethod RoomInfo
+	return json.Unmarshal(text, (*noMethod)(ri))
 }
 
 type PrivateRoom struct {
@@ -62,6 +80,12 @@ func (r Room) Logf(format string, v ...any) {
 }
 func (r Room) Logln(v ...any) {
 	log.Printf("[%v] %s", r.RoomName, fmt.Sprintln(v...))
+}
+func (r Room) RoomInfo() RoomInfo {
+	return RoomInfo{
+		Uuid: r.Uuid,
+		Name: r.RoomName,
+	}
 }
 
 // getting client by a criteria

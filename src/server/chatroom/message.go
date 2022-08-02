@@ -17,6 +17,7 @@ type Message struct {
 	RoomName              string    `json:"RoomName"`              // the name of the server this message is being broadcasted to
 	IsDirectMessage       bool      `json:"IsDirectMessage"`       // whether this is a direct message or not
 	DestinationServerUuid uuid.UUID `json:"DestinationServerUuid"` // the destination server's uuid
+	RoomInfo              RoomInfo  `json:"RoomInfo"`
 }
 
 func (m Message) IsCommand() bool {

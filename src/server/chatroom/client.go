@@ -33,7 +33,7 @@ var (
 	space   = []byte{' '}
 )
 
-var upgrader = websocket.Upgrader{
+var Upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 }
@@ -184,7 +184,7 @@ func (c Client) DirectMessageToOtherClient(other Client, message Message) {
 // handle websocket requests from peers
 func ServeWebSocket(room *Room, w http.ResponseWriter, r *http.Request) {
 	// convert http to websocket
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := Upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// failed to convert
 		log.Println(err)
