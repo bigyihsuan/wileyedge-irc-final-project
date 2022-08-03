@@ -7,6 +7,12 @@ cd /path/to/repo/src/terminal-client
 go run terminal-client.go [--host url:port] [--room roomname] [--nick nickname]
 ```
 
+### Flags
+
+- `--host`: specifies the address and port of the server to connect to. Default is `localhost:8080`.
+- `--room`: specifies the room to initially join in. Default is `main`.
+- `--nick`: specifies a nickname to use. If not provided, will ask for a nickname on program launch.
+
 ## Functionality
 
 The terminal client is a command-line-based client for the IRC-like chat service.

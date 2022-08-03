@@ -1,37 +1,18 @@
 # Program Flow
 
+## Life of a Mesage
+
 ```mermaid
 sequenceDiagram
 
-participant A as Alice
-participant B as Bob
-participant Server
+participant C as User Client
+participant SC as Server Client
+participant SR as Server Room
 
-rect rgba(200, 0, 0, 0.5)
-Note over A, Server: Initial request
-par Init
-B ->>+ Server: Request `/`
-Server ->>- B: Send `home.html`
-A ->>+ Server: Request `/`
-Server ->>- A: Send `home.html`
-end
-end
-rect rgba(0, 200, 0, 0.5)
-Note over A, Server: Client Setup
-par Init
-A ->> Server: Websocket Connection
-A ->>+ Server: Initial nickname
-B ->> Server: Websocket Connection
-B ->>+ Server: Initial nickname
-Server ->> B: Server join (Alice joined)
-Server ->> A: Server join (Bob joined)
-end
-end
-
-rect rgba(0, 0, 200, 0.5)
-Note over A, Server: Message Send/Receive
-B ->> Server: Message from Bob
-Server -->> B: Broadcast from Bob
-Server -->> A: Broadcast from Bob
-end
+C ->> SC: Initial message text
+SC ->> SR: Relay message to server room
+SR -->> SR: Relaying to a different room
+SR ->> SC: Broadcasting message
+SR -->> SC: Direct message
+SC ->> C: Display on client
 ```

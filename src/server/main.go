@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"irc/chatroom"
+	"irc-final-project/chatroom"
 	"log"
 	"net/http"
 

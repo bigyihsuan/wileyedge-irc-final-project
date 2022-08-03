@@ -4,8 +4,12 @@
 
 ```sh
 cd /path/to/repo/src/server
-go run main.go [--host url:port]
+go run main.go [--addr url:port]
 ```
+
+### Flags
+
+- `--addr`: specifies the url and port of this server instance.
 
 ## Functionality
 
