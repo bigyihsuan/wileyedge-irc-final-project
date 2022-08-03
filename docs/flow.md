@@ -11,7 +11,6 @@ participant SR as Server Room
 
 C ->> SC: Initial message text
 SC ->> SR: Relay message to server room
-SR -->> SR: Relaying to a different room
 SR ->> SC: Broadcasting message
 SR -->> SC: Direct message
 SC ->> C: Display on client
